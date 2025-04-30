@@ -1,4 +1,4 @@
-import { useState, createContext, useContext } from "react";
+import { useState, createContext } from "react";
 import { ConnectionStatus } from "../components/VideoChat";
 
 // Initial state

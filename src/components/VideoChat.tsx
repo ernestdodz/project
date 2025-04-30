@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Peer, MediaConnection } from "peerjs";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   Video,
   UserPlus,
@@ -12,11 +13,13 @@ import {
   Mic,
   MicOff,
   VideoOff,
+  Share,
 } from "lucide-react";
 import RoomForm from "./RoomForm";
 import VideoDisplay from "./VideoDisplay";
 import Button from "./ui/Button";
 import { useConnectionStatus } from "../hooks/useConnectionStatus";
+import { useUser } from "../hooks/useUserContext";
 
 export interface ConnectionStatus {
   connected: boolean;
@@ -24,15 +27,27 @@ export interface ConnectionStatus {
   roomId: string | null;
 }
 
-export const VideoChat: React.FC = () => {
+interface VideoChatProps {
+  mode?: "create" | "join";
+}
+
+export const VideoChat: React.FC<VideoChatProps> = ({ mode }) => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [roomId, setRoomId] = useState<string>("");
   const [isCopied, setIsCopied] = useState(false);
+  const [isLinkCopied, setIsLinkCopied] = useState(false);
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [isCameraEnabled, setIsCameraEnabled] = useState(true);
   const callRef = useRef<MediaConnection | null>(null);
+
+  // Router hooks
+  const params = useParams<{ roomId?: string }>();
+  const navigate = useNavigate();
+
+  // User context
+  const { userId } = useUser();
 
   const { status, setStatus } = useConnectionStatus();
 
@@ -70,6 +85,7 @@ export const VideoChat: React.FC = () => {
     }
   }, [localStream]);
 
+  // Initialize peer connection
   useEffect(() => {
     // Generate a unique ID for this peer that will also be used as the room ID when creating a room
     const peerId = uuidv4().substring(0, 8);
@@ -182,7 +198,10 @@ export const VideoChat: React.FC = () => {
       initiator: false,
       roomId: null,
     });
-  }, [callRef, stopCamera, setRemoteStream, setStatus]);
+
+    // Return to home page when disconnected
+    navigate("/", { replace: true });
+  }, [callRef, stopCamera, setRemoteStream, setStatus, navigate]);
 
   const createRoom = useCallback(async () => {
     if (!peer) return;
@@ -200,7 +219,27 @@ export const VideoChat: React.FC = () => {
       initiator: true,
       roomId: peerRoomId,
     });
-  }, [peer, setStatus, startCamera]);
+
+    // Update URL to reflect the room ID for deep linking
+    navigate(`/room/${peerRoomId}`, { replace: true });
+
+    // Mark this user as the creator of this room and store creator ID with room
+    if (typeof window !== "undefined") {
+      const createdRooms = JSON.parse(
+        localStorage.getItem("videoChat_createdRooms") || "[]"
+      );
+      if (!createdRooms.includes(peerRoomId)) {
+        createdRooms.push(peerRoomId);
+        localStorage.setItem(
+          "videoChat_createdRooms",
+          JSON.stringify(createdRooms)
+        );
+
+        // Store the creator's user ID with the room
+        localStorage.setItem(`room_${peerRoomId}_creator`, userId);
+      }
+    }
+  }, [peer, setStatus, startCamera, navigate, userId]);
 
   const joinRoom = useCallback(
     async (id: string) => {
@@ -220,6 +259,9 @@ export const VideoChat: React.FC = () => {
 
         const call = peer.call(id, stream);
         callRef.current = call;
+
+        // Update URL to reflect the room ID for deep linking
+        navigate(`/room/join/${id}`, { replace: true });
 
         // Set a timeout to detect if the connection fails
         const connectionTimeout = setTimeout(() => {
@@ -249,6 +291,8 @@ export const VideoChat: React.FC = () => {
             initiator: false,
             roomId: null,
           });
+          // Return to home page when disconnected
+          navigate("/", { replace: true });
         });
 
         call.on("error", (err) => {
@@ -271,6 +315,7 @@ export const VideoChat: React.FC = () => {
       setStatus,
       startCamera,
       disconnect,
+      navigate,
     ]
   );
 
@@ -307,6 +352,22 @@ export const VideoChat: React.FC = () => {
       });
   };
 
+  const copyRoomLink = () => {
+    if (!status.roomId) return;
+
+    const url = `${window.location.origin}/room/join/${status.roomId}`;
+
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        setIsLinkCopied(true);
+        setTimeout(() => setIsLinkCopied(false), 2000);
+      })
+      .catch((err) => {
+        console.error("Failed to copy link: ", err);
+      });
+  };
+
   const toggleMicrophone = useCallback(() => {
     if (!localStream) return;
 
@@ -334,6 +395,26 @@ export const VideoChat: React.FC = () => {
 
     setIsCameraEnabled(enabled);
   }, [localStream]);
+
+  // Handle deep linking based on URL parameters and mode
+  useEffect(() => {
+    if (!peer) return;
+
+    // If we have a roomId in the URL params, use it to join the room
+    if (params.roomId && !status.roomId) {
+      joinRoom(params.roomId);
+    }
+
+    // If mode is 'create', automatically create a room
+    if (mode === "create" && !status.roomId) {
+      createRoom();
+    }
+
+    // If mode is 'join' and we have a roomId in the URL, join that room
+    if (mode === "join" && params.roomId && !status.roomId) {
+      joinRoom(params.roomId);
+    }
+  }, [peer, params.roomId, mode, status.roomId, joinRoom, createRoom]);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -365,33 +446,66 @@ export const VideoChat: React.FC = () => {
 
             {status.initiator && !status.connected && (
               <div className="p-4 bg-gray-700 rounded-lg">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h3 className="text-sm text-gray-400 mb-1">
-                      Room ID (Share this to invite someone)
-                    </h3>
-                    <p className="text-xl font-mono">{status.roomId}</p>
+                <div className="mb-4">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h3 className="text-sm text-gray-400 mb-1">
+                        Room ID (Share this to invite someone)
+                      </h3>
+                      <p className="text-xl font-mono">{status.roomId}</p>
+                    </div>
+                    <Button
+                      onClick={copyRoomId}
+                      className={`${
+                        isCopied
+                          ? "bg-green-500"
+                          : "bg-blue-500 hover:bg-blue-600"
+                      }`}
+                    >
+                      {isCopied ? (
+                        <>
+                          <Check className="mr-1 h-4 w-4" />
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="mr-1 h-4 w-4" />
+                          Copy ID
+                        </>
+                      )}
+                    </Button>
                   </div>
-                  <Button
-                    onClick={copyRoomId}
-                    className={`${
-                      isCopied
-                        ? "bg-green-500"
-                        : "bg-blue-500 hover:bg-blue-600"
-                    }`}
-                  >
-                    {isCopied ? (
-                      <>
-                        <Check className="mr-1 h-4 w-4" />
-                        Copied
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="mr-1 h-4 w-4" />
-                        Copy
-                      </>
-                    )}
-                  </Button>
+                </div>
+
+                <div>
+                  <h3 className="text-sm text-gray-400 mb-1">
+                    Share Direct Link
+                  </h3>
+                  <div className="flex justify-between items-center">
+                    <p className="text-sm font-mono truncate max-w-[200px]">
+                      {`${window.location.origin}/room/join/${status.roomId}`}
+                    </p>
+                    <Button
+                      onClick={copyRoomLink}
+                      className={`${
+                        isLinkCopied
+                          ? "bg-green-500"
+                          : "bg-blue-500 hover:bg-blue-600"
+                      }`}
+                    >
+                      {isLinkCopied ? (
+                        <>
+                          <Check className="mr-1 h-4 w-4" />
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <Share className="mr-1 h-4 w-4" />
+                          Copy Link
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -442,7 +556,6 @@ export const VideoChat: React.FC = () => {
                 </div>
                 <VideoDisplay stream={localStream} muted />
               </div>
-
               <div>
                 <h2 className="text-xl font-semibold mb-4 flex items-center">
                   <UserPlus className="mr-2 h-5 w-5 text-blue-400" />
@@ -457,6 +570,7 @@ export const VideoChat: React.FC = () => {
                   }
                 />
               </div>
+              ``
             </div>
 
             {!status.connected && !status.initiator && (
