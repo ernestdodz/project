@@ -24,7 +24,15 @@ export interface ConnectionStatus {
   roomId: string | null;
 }
 
-export const VideoChat: React.FC = () => {
+interface VideoChatProps {
+  initialRoomId?: string;
+  autoJoin?: boolean;
+}
+
+export const VideoChat: React.FC<VideoChatProps> = ({
+  initialRoomId,
+  autoJoin = false,
+}) => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -334,6 +342,18 @@ export const VideoChat: React.FC = () => {
 
     setIsCameraEnabled(enabled);
   }, [localStream]);
+
+  // Handle initialRoomId and autoJoin props
+  useEffect(() => {
+    // Wait for peer to be initialized
+    if (!peer) return;
+
+    // If we have an initialRoomId and autoJoin is true, join that room
+    if (initialRoomId && autoJoin) {
+      console.log(`Auto-joining room: ${initialRoomId}`);
+      joinRoom(initialRoomId);
+    }
+  }, [peer, initialRoomId, autoJoin, joinRoom]);
 
   return (
     <div className="max-w-4xl mx-auto">
