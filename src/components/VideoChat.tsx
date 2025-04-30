@@ -9,6 +9,9 @@ import {
   Check,
   Camera,
   RefreshCw,
+  Mic,
+  MicOff,
+  VideoOff,
 } from "lucide-react";
 import RoomForm from "./RoomForm";
 import VideoDisplay from "./VideoDisplay";
@@ -27,6 +30,8 @@ export const VideoChat: React.FC = () => {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [roomId, setRoomId] = useState<string>("");
   const [isCopied, setIsCopied] = useState(false);
+  const [isMicEnabled, setIsMicEnabled] = useState(true);
+  const [isCameraEnabled, setIsCameraEnabled] = useState(true);
   const callRef = useRef<MediaConnection | null>(null);
 
   const { status, setStatus } = useConnectionStatus();
@@ -39,6 +44,16 @@ export const VideoChat: React.FC = () => {
         video: true,
         audio: true,
       });
+
+      // Initialize tracks based on current state
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = isMicEnabled;
+      });
+
+      stream.getVideoTracks().forEach((track) => {
+        track.enabled = isCameraEnabled;
+      });
+
       setLocalStream(stream);
       return stream;
     } catch (error) {
@@ -46,7 +61,7 @@ export const VideoChat: React.FC = () => {
       alert("Could not access camera or microphone. Please check permissions.");
       return null;
     }
-  }, [localStream]);
+  }, [localStream, isMicEnabled, isCameraEnabled]);
 
   const stopCamera = useCallback(() => {
     if (localStream) {
@@ -292,6 +307,34 @@ export const VideoChat: React.FC = () => {
       });
   };
 
+  const toggleMicrophone = useCallback(() => {
+    if (!localStream) return;
+
+    const audioTracks = localStream.getAudioTracks();
+    if (audioTracks.length === 0) return;
+
+    const enabled = !audioTracks[0].enabled;
+    audioTracks.forEach((track) => {
+      track.enabled = enabled;
+    });
+
+    setIsMicEnabled(enabled);
+  }, [localStream]);
+
+  const toggleCamera = useCallback(() => {
+    if (!localStream) return;
+
+    const videoTracks = localStream.getVideoTracks();
+    if (videoTracks.length === 0) return;
+
+    const enabled = !videoTracks[0].enabled;
+    videoTracks.forEach((track) => {
+      track.enabled = enabled;
+    });
+
+    setIsCameraEnabled(enabled);
+  }, [localStream]);
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-gray-800 rounded-lg shadow-lg p-6 mb-8">
@@ -355,10 +398,48 @@ export const VideoChat: React.FC = () => {
 
             <div className="grid md:grid-cols-2 gap-6">
               <div>
-                <h2 className="text-xl font-semibold mb-4 flex items-center">
-                  <Camera className="mr-2 h-5 w-5 text-blue-400" />
-                  Your Camera
-                </h2>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold flex items-center">
+                    <Camera className="mr-2 h-5 w-5 text-blue-400" />
+                    Your Camera
+                  </h2>
+                  <div className="flex space-x-2">
+                    <Button
+                      onClick={toggleMicrophone}
+                      className={`p-2 ${
+                        isMicEnabled
+                          ? "bg-blue-500 hover:bg-blue-600"
+                          : "bg-red-500 hover:bg-red-600"
+                      }`}
+                      title={
+                        isMicEnabled ? "Mute Microphone" : "Unmute Microphone"
+                      }
+                    >
+                      {isMicEnabled ? (
+                        <Mic className="h-5 w-5" />
+                      ) : (
+                        <MicOff className="h-5 w-5" />
+                      )}
+                    </Button>
+                    <Button
+                      onClick={toggleCamera}
+                      className={`p-2 ${
+                        isCameraEnabled
+                          ? "bg-blue-500 hover:bg-blue-600"
+                          : "bg-red-500 hover:bg-red-600"
+                      }`}
+                      title={
+                        isCameraEnabled ? "Turn Off Camera" : "Turn On Camera"
+                      }
+                    >
+                      {isCameraEnabled ? (
+                        <Camera className="h-5 w-5" />
+                      ) : (
+                        <VideoOff className="h-5 w-5" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
                 <VideoDisplay stream={localStream} muted />
               </div>
 
